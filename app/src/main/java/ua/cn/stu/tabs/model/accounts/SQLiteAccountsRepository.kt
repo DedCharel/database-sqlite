@@ -1,14 +1,19 @@
 package ua.cn.stu.tabs.model.accounts
 
+import android.database.sqlite.SQLiteConstraintException
 import android.database.sqlite.SQLiteDatabase
+import androidx.core.content.contentValuesOf
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import ua.cn.stu.tabs.model.AccountAlreadyExistsException
 import ua.cn.stu.tabs.model.AuthException
 import ua.cn.stu.tabs.model.EmptyFieldException
 import ua.cn.stu.tabs.model.Field
 import ua.cn.stu.tabs.model.accounts.entities.Account
 import ua.cn.stu.tabs.model.accounts.entities.SignUpData
 import ua.cn.stu.tabs.model.settings.AppSettings
+import ua.cn.stu.tabs.model.sqlite.AppSQLiteContract
+import ua.cn.stu.tabs.model.sqlite.AppSQLiteContract.AccountsTable
 import ua.cn.stu.tabs.model.sqlite.wrapSQLiteException
 import ua.cn.stu.tabs.utils.AsyncLoader
 
@@ -72,29 +77,73 @@ class SQLiteAccountsRepository(
     }
 
     private fun findAccountIdByEmailAndPassword(email: String, password: String): Long {
-        TODO("#3 \n" +
-                "1) fetch account ID by email and password here \n" +
-                "2) throw AuthException if there is no account with such email OR password is invalid")
+        val cursor = db.query(
+            AccountsTable.TABLE_NAME,
+            arrayOf(AccountsTable.COLUMN_ID, AccountsTable.COLUMN_PASSWORD),
+            "${AccountsTable.COLUMN_EMAIL} = ?",
+            arrayOf(email),
+            null, null, null
+        )
+        return cursor.use {
+            if (cursor.count == 0 ) throw AuthException()
+            cursor.moveToFirst()
+            val passwordFromDb = cursor.getString(cursor.getColumnIndexOrThrow(AccountsTable.COLUMN_PASSWORD))
+            if (passwordFromDb != password) throw AuthException()
+            cursor.getLong(cursor.getColumnIndexOrThrow(AccountsTable.COLUMN_ID))
+        }
+
     }
 
     private fun createAccount(signUpData: SignUpData) {
-        TODO("#4 \n " +
-                "1) Insert a new row into accounts table here using data provided by SignUpData class \n" +
-                "2) throw AccountAlreadyExistsException if there is another account with such email in the database \n" +
-
-                "Tip: use SQLiteDatabase.insertOrThrow method and surround it with try-catch(e: SQLiteConstraintException)")
+        try {
+            db.insertOrThrow(
+                AccountsTable.TABLE_NAME,
+                null,
+                contentValuesOf(
+                    AccountsTable.COLUMN_EMAIL to signUpData.email,
+                    AccountsTable.COLUMN_USERNAME to signUpData.username,
+                    AccountsTable.COLUMN_PASSWORD to signUpData.password,
+                    AccountsTable.COLUMN_CREATED_AT to System.currentTimeMillis()
+                )
+            )
+        } catch (e: SQLiteConstraintException) {
+            val appException = AccountAlreadyExistsException()
+            appException.initCause(e)
+            throw appException
+        }
     }
 
     private fun getAccountById(accountId: Long): Account? {
-        TODO("#5 \n " +
-                "1) Fetch account data by ID from the database \n" +
-                "2) Return NULL if accountId = AppSettings.NO_ACCOUNT_ID or there is no row with such ID in the database \n" +
-                "3) Do not forget to close Cursor")
+        if (accountId == AppSettings.NO_ACCOUNT_ID) return null
+        val cursor = db.query(
+            AccountsTable.TABLE_NAME,
+            arrayOf(AccountsTable.COLUMN_ID, AccountsTable.COLUMN_EMAIL, AccountsTable.COLUMN_USERNAME,
+            AccountsTable.COLUMN_CREATED_AT),
+            "${AccountsTable.COLUMN_ID} = ?",
+            arrayOf(accountId.toString()),
+            null, null, null
+        )
+        return cursor.use {
+            if (cursor.count == 0) return@use null
+            cursor.moveToFirst()
+            Account(
+                id = cursor.getLong(cursor.getColumnIndexOrThrow(AccountsTable.COLUMN_ID)),
+                username = cursor.getString(cursor.getColumnIndexOrThrow(AccountsTable.COLUMN_USERNAME)),
+                email = cursor.getString(cursor.getColumnIndexOrThrow(AccountsTable.COLUMN_EMAIL)),
+                createdAt = cursor.getLong(cursor.getColumnIndexOrThrow(AccountsTable.COLUMN_CREATED_AT))
+            )
+        }
     }
 
     private fun updateUsernameForAccountId(accountId: Long, newUsername: String) {
-        TODO("#6 \n " +
-                "Update username column of the row with the specified account ID")
+        db.update(
+            AccountsTable.TABLE_NAME,
+            contentValuesOf(
+                AccountsTable.COLUMN_USERNAME to newUsername
+            ),
+            "${AccountsTable.TABLE_NAME} = ?",
+            arrayOf(accountId.toString())
+        )
     }
 
     private class AccountId(val value: Long)
